@@ -5,8 +5,9 @@
 ```
 Browser ──► Traefik :80 ──┬─► portside-web  (Next.js dashboard)   app.localhost
                           ├─► portside-api  (Fastify REST + SSE)  api.localhost
-                          └─► user app containers                 <slug>-<hash>.localhost
-                                (routed by labels, discovered automatically)
+                          └─► user app containers                 <slug>.localhost
+                                (routed by labels, discovered automatically —
+                                 stable across redeploys and rollbacks)
 
 portside-api ──► Postgres, Redis            [network: portside-internal]
 portside-worker ──► Postgres, Redis         [network: portside-internal]
@@ -54,12 +55,15 @@ a live daemon.
    type, renders a Dockerfile from a template, and builds the image via the Docker Engine API
    (`dockerode`), streaming build output to a Redis Stream as it goes.
 4. On a successful build, the worker starts the new container with resource limits and Traefik
-   labels, health-checks it, then stops the previous container for that project. This is a
-   brief stop-then-start swap for now; zero-downtime blue/green cutover is a planned upgrade.
+   labels — including a router priority of `Date.now()`, so it always outranks whatever it's
+   replacing on their shared hostname — then health-checks it and gracefully stops (5s SIGTERM
+   grace) the previous container for that project. See [DECISIONS.md](DECISIONS.md)'s ADR-006
+   for exactly what this blue/green swap does and doesn't guarantee.
 5. Traefik picks up the new container's labels via the Docker provider automatically — no proxy
    restart, no config file rewrite. See [writeups/dynamic-proxy-routing.md](writeups/dynamic-proxy-routing.md).
 6. The deployment row is marked `LIVE`; the previous one is marked `SUPERSEDED` and its image is
-   retained for rollback.
+   retained for rollback. If the build or the new container fails instead, it's torn down
+   immediately so a broken deployment can never linger as the highest-priority router.
 
 ## Two hard parts
 

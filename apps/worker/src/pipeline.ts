@@ -80,13 +80,37 @@ function decryptField(ciphertext: Uint8Array, iv: Uint8Array, authTag: Uint8Arra
   );
 }
 
+const HEALTHCHECK_SAMPLES = 4;
+const HEALTHCHECK_INTERVAL_MS = 500;
+
+/**
+ * A single "is it Running?" snapshot isn't enough: our containers use
+ * `RestartPolicy: on-failure`, so a container that crash-loops (exits,
+ * restarts, exits again) can land back in the Running state at the exact
+ * moment a one-shot check happens to sample it — a genuinely broken
+ * deployment reading as healthy purely by timing luck. Sampling several
+ * times and requiring RestartCount to stay at 0 throughout catches that:
+ * a container that has needed even one automatic restart within this
+ * window is not something the blue/green swap should ever cut traffic
+ * over to.
+ */
 async function waitForHealthy(containerId: string): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 2000));
-  const info = await docker.getContainer(containerId).inspect();
-  if (!info.State.Running) {
-    throw new Error(
-      `Container exited shortly after starting (exit code ${info.State.ExitCode ?? 'unknown'})`,
-    );
+  const container = docker.getContainer(containerId);
+  for (let i = 0; i < HEALTHCHECK_SAMPLES; i++) {
+    await new Promise((resolve) => setTimeout(resolve, HEALTHCHECK_INTERVAL_MS));
+    const info = await container.inspect();
+    if (!info.State.Running) {
+      throw new Error(
+        `Container exited (exit code ${info.State.ExitCode ?? 'unknown'})${
+          info.RestartCount > 0 ? ` after ${info.RestartCount} restart(s)` : ''
+        }`,
+      );
+    }
+    if (info.RestartCount > 0) {
+      throw new Error(
+        `Container has already restarted ${info.RestartCount} time(s) — it's crash-looping`,
+      );
+    }
   }
 }
 
@@ -159,6 +183,10 @@ export async function runDeployPipeline(deploymentId: string, redis: Redis): Pro
 
   let workspaceDir: string | undefined;
   let credentialHelperFile: string | undefined;
+  // Set the moment this deployment's own container starts, so the failure
+  // handler can tear it down if anything goes wrong afterward — see the
+  // blue/green note above runContainer() for why that matters.
+  let newContainerId: string | undefined;
   let timedOut = false;
   const timeoutHandle = setTimeout(() => {
     timedOut = true;
@@ -170,6 +198,21 @@ export async function runDeployPipeline(deploymentId: string, redis: Redis): Pro
     const message = err instanceof Error ? err.message : String(err);
     const status: DeploymentStatus = err instanceof DeployCancelledError ? 'CANCELLED' : 'FAILED';
     await logger.emit(`Deployment ${status.toLowerCase()}: ${message}`);
+
+    // This deployment's router shares its Host() rule with whatever was
+    // already live (see the blue/green note above runContainer()) and may
+    // have out-ranked it on priority alone, before this container ever
+    // proved itself healthy. Tearing it down immediately removes its
+    // router from Traefik's discovery and reverts live traffic to the
+    // still-running previous deployment — bounding a bad deploy's impact
+    // to roughly one Traefik provider poll interval instead of leaving a
+    // broken high-priority backend in place indefinitely.
+    if (newContainerId) {
+      await stopAndRemoveContainer(docker, newContainerId).catch((cleanupErr) =>
+        console.error(`[worker] failed to remove broken container for ${deploymentId}`, cleanupErr),
+      );
+    }
+
     const current = await prisma.deployment.findUniqueOrThrow({ where: { id: deploymentId } });
     if (!isTerminal(current.status as DeploymentStatus)) {
       await prisma.deployment.update({
@@ -300,11 +343,22 @@ export async function runDeployPipeline(deploymentId: string, redis: Redis): Pro
     await checkPoint();
     await logger.emit('Starting container...');
 
+    // Blue/green swap: the hostname is stable across every deployment of
+    // this project (see labels.ts), so if there's already a live container
+    // it and this new one briefly share the exact same Host() rule the
+    // instant this container starts — Traefik's Docker provider discovers
+    // it within its own poll interval, well before our own health check
+    // below completes. Priority is what decides which one actually
+    // receives traffic in that window: a plain timestamp guarantees each
+    // new deployment always outranks whatever it's replacing, with no
+    // state to track between deploys. The failure handler above is what
+    // keeps this safe if the new container turns out to be broken.
     const { labels, hostname } = buildTraefikLabels({
       projectSlug: project.slug,
       deploymentId,
       port: CONTAINER_PORT,
       domain: process.env.PORTSIDE_BASE_DOMAIN,
+      priority: Date.now(),
     });
 
     const env: Record<string, string> = {
@@ -322,6 +376,7 @@ export async function runDeployPipeline(deploymentId: string, redis: Redis): Pro
       env,
       labels,
     });
+    newContainerId = containerId;
     await prisma.deployment.update({
       where: { id: deploymentId },
       data: { containerId, hostname, internalPort: CONTAINER_PORT },
@@ -340,6 +395,12 @@ export async function runDeployPipeline(deploymentId: string, redis: Redis): Pro
         where: { id: project.currentDeploymentId },
       });
       if (previous?.containerId) {
+        // stopAndRemoveContainer sends SIGTERM and gives the container 5s
+        // to exit before SIGKILL — connection draining, not an abrupt cut.
+        // By now this new container has already out-ranked it in Traefik
+        // (higher priority, same Host() rule) and passed our own health
+        // check, so no new requests should be landing on the old one; this
+        // just lets whatever was already in flight finish.
         await stopAndRemoveContainer(docker, previous.containerId).catch(() => undefined);
       }
       if (previous) {

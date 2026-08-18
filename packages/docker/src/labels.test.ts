@@ -20,27 +20,37 @@ describe('buildTraefikLabels', () => {
     ).toBe('8080');
   });
 
-  it('derives a deterministic hostname from the same slug + deploymentId', () => {
+  it('derives a deterministic hostname from the slug alone', () => {
     const a = buildTraefikLabels(base);
     const b = buildTraefikLabels(base);
     expect(a.hostname).toBe(b.hostname);
+    expect(a.hostname).toBe('my-app.localhost');
   });
 
-  it('produces different hostnames for different deploymentIds of the same project', () => {
+  it('keeps the hostname stable across different deploymentIds of the same project', () => {
+    // This is what makes redeploys and rollbacks keep serving the same URL,
+    // and what a blue/green swap needs: both the outgoing and incoming
+    // deployment's routers match the exact same Host() rule.
     const a = buildTraefikLabels({ ...base, deploymentId: 'dep-1' });
     const b = buildTraefikLabels({ ...base, deploymentId: 'dep-2' });
-    expect(a.hostname).not.toBe(b.hostname);
+    expect(a.hostname).toBe(b.hostname);
+  });
+
+  it('still namespaces router/service names per deployment, so two can coexist', () => {
+    const a = buildTraefikLabels({ ...base, deploymentId: 'dep-1' });
+    const b = buildTraefikLabels({ ...base, deploymentId: 'dep-2' });
     expect(a.routerName).not.toBe(b.routerName);
+    expect(a.serviceName).not.toBe(b.serviceName);
   });
 
   it('sanitizes slugs with uppercase, spaces, and unsafe characters', () => {
     const result = buildTraefikLabels({ ...base, projectSlug: 'My Cool App!!' });
-    expect(result.hostname).toMatch(/^my-cool-app-[0-9a-f]{8}\.localhost$/);
+    expect(result.hostname).toBe('my-cool-app.localhost');
   });
 
   it('collapses repeated separators and trims leading/trailing hyphens', () => {
     const result = buildTraefikLabels({ ...base, projectSlug: '--Foo___Bar--' });
-    expect(result.hostname.startsWith('foo-bar-')).toBe(true);
+    expect(result.hostname).toBe('foo-bar.localhost');
   });
 
   it('rejects a slug with no usable characters', () => {

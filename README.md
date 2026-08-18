@@ -12,7 +12,7 @@ apps, and Dockerfile-based apps) rather than supporting every framework.
 ```
 Browser ──► Traefik :80 ──┬─► portside-web  (Next.js dashboard)   app.localhost
                           ├─► portside-api  (Fastify REST + SSE)  api.localhost
-                          └─► user app containers                 <slug>-<hash>.localhost
+                          └─► user app containers                 <slug>.localhost
 
 portside-api ──► Postgres, Redis            [network: portside-internal]
 portside-worker ──► Postgres, Redis         [network: portside-internal]

@@ -8,6 +8,8 @@ import {
   detectNodeEntrypoint,
   detectProjectType,
   isTerminal,
+  logStreamKey,
+  LOG_STREAM_TTL_SECONDS,
   type DeploymentStatus,
 } from '@portside/core';
 import {
@@ -21,6 +23,7 @@ import { getPrismaClient } from '@portside/db';
 import Docker from 'dockerode';
 import type { Redis } from 'ioredis';
 import { cloneRepo } from './git.js';
+import { LogEmitter } from './log-emitter.js';
 
 const WORKSPACES_ROOT = process.env.PORTSIDE_WORKSPACES_ROOT ?? '/var/portside/workspaces';
 const NETWORK = 'portside-apps';
@@ -87,6 +90,31 @@ async function waitForHealthy(containerId: string): Promise<void> {
   }
 }
 
+/** Flushes the full (already-redacted) log to disk and records it in Postgres. */
+async function archiveLog(deploymentId: string, logger: LogEmitter): Promise<void> {
+  const fullLog = logger.fullLog();
+  const logsDir = path.join(WORKSPACES_ROOT, 'logs');
+  await fsp.mkdir(logsDir, { recursive: true });
+  const storageKey = path.join('logs', `${deploymentId}.log`);
+  await fsp.writeFile(path.join(WORKSPACES_ROOT, storageKey), fullLog, 'utf8');
+
+  const prisma = getPrismaClient();
+  await prisma.logArchive.upsert({
+    where: { deploymentId },
+    create: {
+      deploymentId,
+      storageKey,
+      byteSize: Buffer.byteLength(fullLog, 'utf8'),
+      lineCount: fullLog.length === 0 ? 0 : fullLog.split('\n').length,
+    },
+    update: {
+      storageKey,
+      byteSize: Buffer.byteLength(fullLog, 'utf8'),
+      lineCount: fullLog.length === 0 ? 0 : fullLog.split('\n').length,
+    },
+  });
+}
+
 /**
  * Runs one deployment end to end: clone/extract -> detect -> build -> run ->
  * health-check -> supersede the previous live deployment. All state lives in
@@ -108,6 +136,27 @@ export async function runDeployPipeline(deploymentId: string, redis: Redis): Pro
     throw new DeployLockedError(`Project ${project.id} already has a deploy in progress`);
   }
 
+  // Decrypted up front so every secret is known to the redactor before the
+  // very first log line — including git's own clone output — is emitted.
+  const secrets: string[] = [];
+  let githubToken: string | undefined;
+  if (project.user.tokenCiphertext && project.user.tokenIv && project.user.tokenAuthTag) {
+    githubToken = decryptField(
+      project.user.tokenCiphertext,
+      project.user.tokenIv,
+      project.user.tokenAuthTag,
+    );
+    secrets.push(githubToken);
+  }
+  const envVarValues = new Map<string, string>();
+  for (const envVar of project.envVars) {
+    const value = decryptField(envVar.ciphertext, envVar.iv, envVar.authTag);
+    envVarValues.set(envVar.key, value);
+    secrets.push(value);
+  }
+
+  const logger = new LogEmitter(redis, deploymentId, secrets);
+
   let workspaceDir: string | undefined;
   let credentialHelperFile: string | undefined;
   let timedOut = false;
@@ -120,6 +169,7 @@ export async function runDeployPipeline(deploymentId: string, redis: Redis): Pro
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const status: DeploymentStatus = err instanceof DeployCancelledError ? 'CANCELLED' : 'FAILED';
+    await logger.emit(`Deployment ${status.toLowerCase()}: ${message}`);
     const current = await prisma.deployment.findUniqueOrThrow({ where: { id: deploymentId } });
     if (!isTerminal(current.status as DeploymentStatus)) {
       await prisma.deployment.update({
@@ -132,6 +182,10 @@ export async function runDeployPipeline(deploymentId: string, redis: Redis): Pro
     clearTimeout(timeoutHandle);
     if (workspaceDir) await fsp.rm(workspaceDir, { recursive: true, force: true });
     if (credentialHelperFile) await fsp.rm(credentialHelperFile, { force: true });
+    await archiveLog(deploymentId, logger).catch((err) =>
+      console.error(`[worker] failed to archive log for ${deploymentId}`, err),
+    );
+    await redis.expire(logStreamKey(deploymentId), LOG_STREAM_TTL_SECONDS);
     await redis.eval(RELEASE_LOCK_SCRIPT, 1, lockKey(project.id), lockValue);
   }
 
@@ -144,19 +198,16 @@ export async function runDeployPipeline(deploymentId: string, redis: Redis): Pro
   async function runStages(): Promise<void> {
     await transitionTo(deploymentId, 'CLONING');
     await checkPoint();
+    await logger.emit(
+      project.sourceType === 'GIT'
+        ? `Cloning ${project.repoUrl} (branch ${project.branch})...`
+        : 'Extracting uploaded archive...',
+    );
 
     workspaceDir = path.join(os.tmpdir(), `portside-deploy-${deploymentId}`);
     await fsp.mkdir(workspaceDir, { recursive: true });
 
     if (project.sourceType === 'GIT') {
-      let githubToken: string | undefined;
-      if (project.user.tokenCiphertext && project.user.tokenIv && project.user.tokenAuthTag) {
-        githubToken = decryptField(
-          project.user.tokenCiphertext,
-          project.user.tokenIv,
-          project.user.tokenAuthTag,
-        );
-      }
       const cloneResult = await cloneRepo(
         project.repoUrl!,
         project.branch,
@@ -175,6 +226,7 @@ export async function runDeployPipeline(deploymentId: string, redis: Redis): Pro
     const projectRoot =
       project.rootDir === '.' ? workspaceDir : path.join(workspaceDir, project.rootDir);
     const detection = detectProjectType(projectRoot);
+    await logger.emit(`Detected project type: ${detection.type} (${detection.reason})`);
     await prisma.deployment.update({
       where: { id: deploymentId },
       data: { detectedType: detection.type },
@@ -192,17 +244,21 @@ export async function runDeployPipeline(deploymentId: string, redis: Redis): Pro
     }
 
     const imageTag = `portside/${project.slug}:${deploymentId.slice(0, 12)}`;
+    await logger.emit(`Building image ${imageTag}...`);
     await buildImage({
       docker,
       contextDir: projectRoot,
       imageTag,
       labels: { 'portside.managed': 'true', 'portside.project-slug': project.slug },
-      onLog: (line) => console.log(`[build ${deploymentId}] ${line}`),
+      onLog: (line) => {
+        logger.emit(line).catch((err) => console.error('[worker] failed to emit log line', err));
+      },
     });
     await prisma.deployment.update({ where: { id: deploymentId }, data: { imageTag } });
 
     await transitionTo(deploymentId, 'DEPLOYING');
     await checkPoint();
+    await logger.emit('Starting container...');
 
     const { labels, hostname } = buildTraefikLabels({
       projectSlug: project.slug,
@@ -211,10 +267,10 @@ export async function runDeployPipeline(deploymentId: string, redis: Redis): Pro
       domain: process.env.PORTSIDE_BASE_DOMAIN,
     });
 
-    const env: Record<string, string> = { PORT: String(CONTAINER_PORT) };
-    for (const envVar of project.envVars) {
-      env[envVar.key] = decryptField(envVar.ciphertext, envVar.iv, envVar.authTag);
-    }
+    const env: Record<string, string> = {
+      PORT: String(CONTAINER_PORT),
+      ...Object.fromEntries(envVarValues),
+    };
 
     const containerName = `portside-${project.slug}-${deploymentId.slice(0, 12)}`;
     const { containerId } = await runContainer({
@@ -233,9 +289,11 @@ export async function runDeployPipeline(deploymentId: string, redis: Redis): Pro
 
     await transitionTo(deploymentId, 'HEALTHCHECK');
     await checkPoint();
+    await logger.emit('Waiting for the container to become healthy...');
     await waitForHealthy(containerId);
 
     await transitionTo(deploymentId, 'LIVE');
+    await logger.emit(`Live at http://${hostname}`);
 
     if (project.currentDeploymentId && project.currentDeploymentId !== deploymentId) {
       const previous = await prisma.deployment.findUnique({

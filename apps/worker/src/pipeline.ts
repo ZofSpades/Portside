@@ -195,15 +195,7 @@ export async function runDeployPipeline(deploymentId: string, redis: Redis): Pro
     await assertNotCancelled(redis, deploymentId);
   }
 
-  async function runStages(): Promise<void> {
-    await transitionTo(deploymentId, 'CLONING');
-    await checkPoint();
-    await logger.emit(
-      project.sourceType === 'GIT'
-        ? `Cloning ${project.repoUrl} (branch ${project.branch})...`
-        : 'Extracting uploaded archive...',
-    );
-
+  async function buildFromSource(): Promise<string> {
     workspaceDir = path.join(os.tmpdir(), `portside-deploy-${deploymentId}`);
     await fsp.mkdir(workspaceDir, { recursive: true });
 
@@ -255,6 +247,54 @@ export async function runDeployPipeline(deploymentId: string, redis: Redis): Pro
       },
     });
     await prisma.deployment.update({ where: { id: deploymentId }, data: { imageTag } });
+    return imageTag;
+  }
+
+  /** Reuses a previous deployment's already-built image — no clone, no build. */
+  async function reuseImageForRollback(): Promise<string> {
+    if (!deployment.rolledBackFromId) {
+      throw new Error('Rollback deployment is missing rolledBackFromId');
+    }
+    const source = await prisma.deployment.findUniqueOrThrow({
+      where: { id: deployment.rolledBackFromId },
+    });
+    if (!source.imageTag || !source.detectedType) {
+      throw new Error(`Cannot roll back to deployment ${source.id}: it has no recorded image`);
+    }
+    await logger.emit(
+      `Rolling back to deployment ${source.id} — reusing image ${source.imageTag}, no rebuild`,
+    );
+
+    await transitionTo(deploymentId, 'DETECTING');
+    await checkPoint();
+    await prisma.deployment.update({
+      where: { id: deploymentId },
+      data: { detectedType: source.detectedType },
+    });
+
+    await transitionTo(deploymentId, 'BUILDING');
+    await checkPoint();
+    await prisma.deployment.update({
+      where: { id: deploymentId },
+      data: { imageTag: source.imageTag },
+    });
+    return source.imageTag;
+  }
+
+  async function runStages(): Promise<void> {
+    const isRollback = deployment.trigger === 'ROLLBACK';
+
+    await transitionTo(deploymentId, 'CLONING');
+    await checkPoint();
+    if (!isRollback) {
+      await logger.emit(
+        project.sourceType === 'GIT'
+          ? `Cloning ${project.repoUrl} (branch ${project.branch})...`
+          : 'Extracting uploaded archive...',
+      );
+    }
+
+    const imageTag = isRollback ? await reuseImageForRollback() : await buildFromSource();
 
     await transitionTo(deploymentId, 'DEPLOYING');
     await checkPoint();

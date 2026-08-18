@@ -141,6 +141,19 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
     if (!project) return;
 
     const prisma = getPrismaClient();
+    // Collected before the delete, since it cascades the Deployment rows
+    // that carry the containerId/imageTag references cleanup needs.
+    const deployments = await prisma.deployment.findMany({
+      where: { projectId: project.id },
+      select: { containerId: true, imageTag: true },
+    });
+    const containerIds = deployments
+      .map((d) => d.containerId)
+      .filter((id): id is string => id !== null);
+    const imageTags = [
+      ...new Set(deployments.map((d) => d.imageTag).filter((t): t is string => t !== null)),
+    ];
+
     await prisma.project.delete({ where: { id: project.id } });
 
     if (project.sourceType === 'ZIP') {
@@ -148,6 +161,13 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
         recursive: true,
         force: true,
       });
+    }
+
+    // The API never touches Docker directly (only the worker holds socket
+    // access — see docs/SECURITY.md) — container/image teardown is enqueued
+    // as a job instead, same as everything else that reaches Docker.
+    if (containerIds.length > 0 || imageTags.length > 0) {
+      await deployQueue.add('cleanup', { containerIds, imageTags });
     }
 
     reply.code(204).send();
@@ -218,6 +238,45 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
     const deployment = await enqueueDeploy(project.id, trigger);
     reply.code(202).send(deployment);
   });
+
+  app.post<{ Body: { toDeploymentId: string } }>(
+    '/api/projects/:id/rollback',
+    async (req, reply) => {
+      const project = await loadProjectOr404(req, reply);
+      if (!project) return;
+
+      const { toDeploymentId } = req.body ?? {};
+      if (!toDeploymentId) {
+        return reply.code(400).send({ error: 'toDeploymentId is required' });
+      }
+
+      const prisma = getPrismaClient();
+      const target = await prisma.deployment.findFirst({
+        where: { id: toDeploymentId, projectId: project.id },
+      });
+      if (!target) {
+        return reply.code(404).send({ error: 'Target deployment not found' });
+      }
+      if (!target.imageTag) {
+        return reply
+          .code(409)
+          .send({ error: 'Target deployment has no built image to roll back to' });
+      }
+
+      // Repoints traffic at a previously-built image — the worker skips
+      // clone/detect/build entirely for a ROLLBACK-triggered deployment.
+      const deployment = await prisma.deployment.create({
+        data: {
+          projectId: project.id,
+          status: 'QUEUED',
+          trigger: 'ROLLBACK',
+          rolledBackFromId: target.id,
+        },
+      });
+      await deployQueue.add('deploy', { deploymentId: deployment.id }, { jobId: deployment.id });
+      reply.code(202).send(deployment);
+    },
+  );
 
   app.get('/api/projects/:id/deployments', async (req, reply) => {
     const project = await loadProjectOr404(req, reply);

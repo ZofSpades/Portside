@@ -1,5 +1,6 @@
 import { Worker } from 'bullmq';
 import { Redis } from 'ioredis';
+import { runCleanupJob, type CleanupJobData } from './cleanup.js';
 import { runJanitor } from './janitor.js';
 import { runDeployPipeline } from './pipeline.js';
 
@@ -19,6 +20,12 @@ async function main() {
   const worker = new Worker(
     'deploys',
     async (job) => {
+      if (job.name === 'cleanup') {
+        console.log(`[worker] running cleanup job ${job.id}`);
+        await runCleanupJob(job.data as CleanupJobData);
+        return;
+      }
+
       const { deploymentId } = job.data as { deploymentId: string };
       console.log(`[worker] starting deployment ${deploymentId}`);
       await runDeployPipeline(deploymentId, redis);
@@ -28,7 +35,11 @@ async function main() {
   );
 
   worker.on('failed', (job, err) => {
-    console.error(`[worker] deployment ${job?.data?.deploymentId ?? '?'} failed:`, err.message);
+    if (job?.name === 'cleanup') {
+      console.error(`[worker] cleanup job ${job.id} failed:`, err.message);
+    } else {
+      console.error(`[worker] deployment ${job?.data?.deploymentId ?? '?'} failed:`, err.message);
+    }
   });
 
   const janitorTimer = setInterval(() => {

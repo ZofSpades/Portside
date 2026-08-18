@@ -66,6 +66,7 @@ async function main() {
       docker,
       contextDir: buildDir,
       imageTag,
+      labels: { 'portside.managed': 'true', 'portside.project-slug': `demo-${fixtureArg}` },
       onLog: (line) => console.log(`  ${line}`),
     });
   } finally {

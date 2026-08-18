@@ -26,6 +26,8 @@
     "check-clean-tree": "node scripts/check-local-only-files.mjs",
     "predeploy:demo": "tsc -b packages/core packages/docker",
     "deploy:demo": "tsx scripts/deploy-demo.ts",
+    "predev:seed-deploy": "tsc -b packages/core packages/db",
+    "dev:seed-deploy": "tsx scripts/dev-seed-deploy.ts",
     "prisma:generate": "npm run generate --workspace packages/db",
     "prisma:migrate": "npm run migrate:dev --workspace packages/db",
     "prepare": "husky"
@@ -43,6 +45,8 @@
     "vitest": "^2.1.8"
   },
   "dependencies": {
+    "adm-zip": "^0.5.16",
+    "bullmq": "^5.34.6",
     "dockerode": "^4.0.3"
   },
   "allowScripts": {

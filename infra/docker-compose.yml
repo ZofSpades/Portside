@@ -112,7 +112,13 @@ services:
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
       GITHUB_CALLBACK_URL: ${GITHUB_CALLBACK_URL}
       PORTSIDE_BASE_DOMAIN: ${PORTSIDE_BASE_DOMAIN:-localhost}
+      PORTSIDE_APP_PROTOCOL: ${PORTSIDE_APP_PROTOCOL:-http}
+      PORTSIDE_WORKSPACES_ROOT: /var/portside/workspaces
       PORT: 3001
+    volumes:
+      # Zip uploads are extracted here so the worker can read them back at
+      # deploy time — the same volume the worker uses for build contexts.
+      - build-workspaces:/var/portside/workspaces
     networks:
       - portside-internal
       - portside-apps
@@ -140,6 +146,7 @@ services:
       REDIS_URL: redis://redis:6379
       PORTSIDE_ENCRYPTION_KEY: ${PORTSIDE_ENCRYPTION_KEY}
       PORTSIDE_BASE_DOMAIN: ${PORTSIDE_BASE_DOMAIN:-localhost}
+      PORTSIDE_WORKSPACES_ROOT: /var/portside/workspaces
     volumes:
       # Full (read-write) Docker socket access is required to build and run
       # user containers — this is the one component with real host power.

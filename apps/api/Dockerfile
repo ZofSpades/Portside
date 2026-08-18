@@ -1,6 +1,16 @@
 # Build context: repo root (npm workspaces need the full workspace tree).
-FROM node:22-alpine AS base
+#
+# Debian slim (glibc), not Alpine — @fastify/secure-session's native
+# sodium-native dependency has no musl/Alpine prebuild, so it fails at
+# runtime on Alpine (see docs/SECURITY.md's session notes / commit history).
+# Every stage must share the same libc family, since node_modules built in
+# `deps` is copied wholesale into `runtime`.
+FROM node:22-slim AS base
 WORKDIR /repo
+# Prisma's query engine needs OpenSSL and can't detect its version without
+# it on Debian slim, silently guessing a version otherwise.
+RUN apt-get update && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
 
 FROM base AS deps
 COPY package.json package-lock.json* ./
@@ -19,10 +29,12 @@ COPY apps/api ./apps/api
 RUN npm run generate --workspace packages/db
 RUN npx tsc -b packages/core packages/db apps/api
 
-FROM node:22-alpine AS runtime
+FROM node:22-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /repo
-RUN addgroup -S portside && adduser -S portside -G portside
+RUN apt-get update && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -r portside && useradd -r -g portside portside
 COPY --from=deps /repo/node_modules ./node_modules
 COPY --from=build /repo/packages/core/dist ./packages/core/dist
 COPY --from=build /repo/packages/core/package.json ./packages/core/package.json

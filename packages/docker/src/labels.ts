@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { sanitizeSlug } from '@portside/core';
 
 export interface TraefikLabelInput {
   /** The project's own slug, e.g. "my-app". Gets sanitized and combined with a hash. */
@@ -23,18 +24,6 @@ export interface TraefikLabelResult {
 const RESERVED_SLUGS = new Set(['api', 'app', 'traefik', 'www', 'admin', 'localhost']);
 const MIN_PORT = 1;
 const MAX_PORT = 65535;
-
-function sanitizeSlug(input: string): string {
-  const cleaned = input
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-  if (!cleaned) {
-    throw new Error(`projectSlug "${input}" contains no usable alphanumeric characters`);
-  }
-  return cleaned;
-}
 
 function shortHash(deploymentId: string): string {
   return createHash('sha256').update(deploymentId).digest('hex').slice(0, 8);

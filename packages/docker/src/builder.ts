@@ -36,6 +36,15 @@ export interface BuildImageOptions {
   /** Path to the Dockerfile, relative to contextDir. Defaults to "Dockerfile". */
   dockerfile?: string;
   imageTag: string;
+  /**
+   * Applied to the built image itself (not just the container) via the
+   * Docker Engine API's build `labels` option — this works uniformly across
+   * every project type, including DOCKER projects using their own
+   * Dockerfile, without needing a LABEL instruction in the Dockerfile
+   * itself. The janitor (packages/docker consumers) relies on these to find
+   * images it's allowed to prune.
+   */
+  labels?: Record<string, string>;
   onLog?: (line: string) => void;
 }
 
@@ -45,10 +54,10 @@ export interface BuildImageOptions {
  * build`. Build output is parsed into log lines as it arrives.
  */
 export async function buildImage(opts: BuildImageOptions): Promise<{ imageTag: string }> {
-  const { docker, contextDir, dockerfile = 'Dockerfile', imageTag, onLog } = opts;
+  const { docker, contextDir, dockerfile = 'Dockerfile', imageTag, labels, onLog } = opts;
 
   const tarStream = tar.pack(contextDir);
-  const buildStream = await docker.buildImage(tarStream, { t: imageTag, dockerfile });
+  const buildStream = await docker.buildImage(tarStream, { t: imageTag, dockerfile, labels });
 
   await new Promise<void>((resolve, reject) => {
     docker.modem.followProgress(

@@ -5,12 +5,13 @@ services:
   api:
     build:
       target: deps
-    command: sh -c "npm run generate --workspace packages/db && npx tsx watch apps/api/src/index.ts"
+    command: sh -c "npm run generate --workspace packages/db && npx tsc -b packages/core packages/db && npx tsx watch apps/api/src/index.ts"
     environment:
       LOG_LEVEL: debug
     volumes:
+      - ../tsconfig.base.json:/repo/tsconfig.base.json
       - ../apps/api/src:/repo/apps/api/src
-      - ../packages/core/src:/repo/packages/core/src
+      - ../packages/core:/repo/packages/core
       - ../packages/db:/repo/packages/db
     develop:
       watch:
@@ -21,12 +22,14 @@ services:
   worker:
     build:
       target: deps
-    command: sh -c "npm run generate --workspace packages/db && npx tsx watch apps/worker/src/index.ts"
+    command: sh -c "npm run generate --workspace packages/db && npx tsc -b packages/core packages/db packages/docker && npx tsx watch apps/worker/src/index.ts"
     volumes:
+      - ../tsconfig.base.json:/repo/tsconfig.base.json
       - ../apps/worker/src:/repo/apps/worker/src
-      - ../packages/core/src:/repo/packages/core/src
-      - ../packages/docker/src:/repo/packages/docker/src
+      - ../packages/core:/repo/packages/core
+      - ../packages/docker:/repo/packages/docker
       - ../packages/db:/repo/packages/db
+      - ../templates:/repo/templates
 
   web:
     build:

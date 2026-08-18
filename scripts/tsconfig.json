@@ -4,6 +4,10 @@
     "outDir": "../dist/scripts",
     "rootDir": "."
   },
-  "include": ["deploy-demo.ts"],
-  "references": [{ "path": "../packages/core" }, { "path": "../packages/docker" }]
+  "include": ["deploy-demo.ts", "dev-seed-deploy.ts"],
+  "references": [
+    { "path": "../packages/core" },
+    { "path": "../packages/db" },
+    { "path": "../packages/docker" }
+  ]
 }

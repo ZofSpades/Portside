@@ -1,0 +1,23 @@
+# Static Traefik config. Dynamic routing comes entirely from container
+# labels via the Docker provider — no dynamic config files are ever
+# written or reloaded. See docs/writeups/dynamic-proxy-routing.md.
+entryPoints:
+  web:
+    address: ':80'
+  traefik:
+    address: ':8080'
+
+api:
+  dashboard: true
+  insecure: true # dev only — see docs/RUNBOOK.md before any non-local deployment
+
+providers:
+  docker:
+    # Routed through docker-api-shim (version-prefix rewrite), which itself
+    # forwards to docker-socket-proxy. See infra/docker-api-shim/nginx.conf.
+    endpoint: 'tcp://docker-api-shim:2376'
+    exposedByDefault: false
+    network: portside-apps
+
+log:
+  level: INFO

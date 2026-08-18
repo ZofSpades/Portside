@@ -1,0 +1,19 @@
+{
+  "name": "@portside/docker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "dockerode": "^4.0.3"
+  },
+  "devDependencies": {
+    "@types/dockerode": "^3.3.31",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,171 @@
+# Portside local dev stack. Run from repo root: docker compose -f infra/docker-compose.yml up
+#
+# Network isolation (see docs/ARCHITECTURE.md):
+#   portside-internal — platform services only (db, redis, socket-proxy, api, worker)
+#   portside-apps     — traefik + api + web + deployed user containers
+# User app containers are attached to portside-apps ONLY, so they can never
+# reach Postgres, Redis, or the API.
+
+name: portside
+
+networks:
+  portside-internal:
+    name: portside-internal
+  portside-apps:
+    name: portside-apps
+
+volumes:
+  postgres-data:
+  redis-data:
+  build-workspaces:
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-portside}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-portside}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - portside-internal
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-portside}']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    networks:
+      - portside-internal
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Read-only proxy in front of the Docker socket. Traefik gets container
+  # discovery through this instead of a raw socket mount — a compromised
+  # Traefik container still cannot create/exec/delete anything.
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      NETWORKS: 1
+      EVENTS: 1
+      PING: 1
+      VERSION: 1
+      POST: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - portside-internal
+
+  # Rewrites the Docker Engine API version prefix Traefik's client hardcodes
+  # for its initial negotiation call, which this host's Docker Engine
+  # (MinAPIVersion 1.40) rejects outright. See docker-api-shim/nginx.conf.
+  docker-api-shim:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ../infra/docker-api-shim/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - portside-internal
+    depends_on:
+      - docker-socket-proxy
+
+  traefik:
+    image: traefik:v3.5
+    restart: unless-stopped
+    command:
+      - --configFile=/etc/traefik/traefik.yml
+    ports:
+      - '${TRAEFIK_HTTP_PORT:-80}:80'
+      - '${TRAEFIK_DASHBOARD_PORT:-8080}:8080'
+    volumes:
+      - ../infra/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+    networks:
+      - portside-internal
+      - portside-apps
+    depends_on:
+      - docker-api-shim
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: redis://redis:6379
+      DOCKER_SOCKET_PROXY_HOST: tcp://docker-socket-proxy:2375
+      PORTSIDE_ENCRYPTION_KEY: ${PORTSIDE_ENCRYPTION_KEY}
+      SESSION_SECRET: ${SESSION_SECRET}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
+      GITHUB_CALLBACK_URL: ${GITHUB_CALLBACK_URL}
+      PORTSIDE_BASE_DOMAIN: ${PORTSIDE_BASE_DOMAIN:-localhost}
+      PORT: 3001
+    networks:
+      - portside-internal
+      - portside-apps
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      docker-socket-proxy:
+        condition: service_started
+    labels:
+      traefik.enable: 'true'
+      traefik.http.routers.portside-api.rule: Host(`api.localhost`)
+      traefik.http.routers.portside-api.entrypoints: web
+      traefik.http.services.portside-api.loadbalancer.server.port: '3001'
+      portside.managed: 'true'
+
+  worker:
+    build:
+      context: ..
+      dockerfile: apps/worker/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: redis://redis:6379
+      PORTSIDE_ENCRYPTION_KEY: ${PORTSIDE_ENCRYPTION_KEY}
+      PORTSIDE_BASE_DOMAIN: ${PORTSIDE_BASE_DOMAIN:-localhost}
+    volumes:
+      # Full (read-write) Docker socket access is required to build and run
+      # user containers — this is the one component with real host power.
+      # See the "known v1 gaps" list in docs/SECURITY.md.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - build-workspaces:/var/portside/workspaces
+    networks:
+      - portside-internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: http://api.localhost
+    networks:
+      - portside-apps
+    labels:
+      traefik.enable: 'true'
+      traefik.http.routers.portside-web.rule: Host(`app.localhost`)
+      traefik.http.routers.portside-web.entrypoints: web
+      traefik.http.services.portside-web.loadbalancer.server.port: '3000'
+      portside.managed: 'true'

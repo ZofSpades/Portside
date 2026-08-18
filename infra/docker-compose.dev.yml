@@ -1,0 +1,38 @@
+# Dev overrides: hot-reload for api/worker/web instead of production builds.
+# Usage: docker compose -f infra/docker-compose.yml -f infra/docker-compose.dev.yml up
+
+services:
+  api:
+    build:
+      target: deps
+    command: sh -c "npm run generate --workspace packages/db && npx tsx watch apps/api/src/index.ts"
+    environment:
+      LOG_LEVEL: debug
+    volumes:
+      - ../apps/api/src:/repo/apps/api/src
+      - ../packages/core/src:/repo/packages/core/src
+      - ../packages/db:/repo/packages/db
+    develop:
+      watch:
+        - action: sync
+          path: ../apps/api/src
+          target: /repo/apps/api/src
+
+  worker:
+    build:
+      target: deps
+    command: sh -c "npm run generate --workspace packages/db && npx tsx watch apps/worker/src/index.ts"
+    volumes:
+      - ../apps/worker/src:/repo/apps/worker/src
+      - ../packages/core/src:/repo/packages/core/src
+      - ../packages/docker/src:/repo/packages/docker/src
+      - ../packages/db:/repo/packages/db
+
+  web:
+    build:
+      target: deps
+    command: sh -c "cd apps/web && npx next dev -p 3000"
+    volumes:
+      - ../apps/web:/repo/apps/web
+    environment:
+      NODE_ENV: development

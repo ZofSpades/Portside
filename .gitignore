@@ -1,0 +1,63 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Build output
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+logs/
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Prisma
+packages/db/prisma/migrations/dev.db*
+
+# Runtime data volumes mounted locally (if any)
+infra/data/
+
+# Editor / tooling configs
+CLAUDE.md
+.claude/
+AGENTS.md
+.cursor/
+.cursorrules
+.windsurfrules
+.aider*
+.github/copilot-instructions.md
+*.prompt.md
+prompts/
+notes/
+.plan/
+PROMPT*.md
+BRIEF*.md
+plan.md
+
+# Internal notes (kept locally only)
+docs/CHANGELOG.md
+docs/DECISIONS.md
+docs/ROADMAP.md
+docs/RUNBOOK.md

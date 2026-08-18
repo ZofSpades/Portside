@@ -1,0 +1,140 @@
+// Portside data model.
+// See docs/DATA-MODEL.md for the deployment state machine and design notes.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SourceType {
+  GIT
+  ZIP
+}
+
+enum DeploymentTrigger {
+  MANUAL
+  REDEPLOY
+  ROLLBACK
+}
+
+enum DeploymentStatus {
+  QUEUED
+  CLONING
+  DETECTING
+  BUILDING
+  DEPLOYING
+  HEALTHCHECK
+  LIVE
+  SUPERSEDED
+  STOPPED
+  FAILED
+  CANCELLED
+}
+
+enum DetectedType {
+  STATIC
+  STATIC_BUILT
+  NODE
+  DOCKER
+}
+
+model User {
+  id             String   @id @default(cuid())
+  githubId       String   @unique
+  login          String
+  avatarUrl      String?
+  tokenCiphertext Bytes?
+  tokenIv        Bytes?
+  tokenAuthTag   Bytes?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  projects Project[]
+
+  @@map("users")
+}
+
+model Project {
+  id                  String   @id @default(cuid())
+  userId              String
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                String
+  slug                String   @unique
+  sourceType          SourceType
+  repoUrl             String?
+  repoFullName        String?
+  branch              String   @default("main")
+  rootDir             String   @default(".")
+  installCmd          String?
+  buildCmd            String?
+  startCmd            String?
+  frameworkOverride   DetectedType?
+  currentDeploymentId String?  @unique
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  deployments Deployment[] @relation("ProjectDeployments")
+  currentDeployment Deployment? @relation("CurrentDeployment", fields: [currentDeploymentId], references: [id])
+  envVars     EnvVar[]
+
+  @@index([userId])
+  @@map("projects")
+}
+
+model Deployment {
+  id                String            @id @default(cuid())
+  projectId         String
+  project           Project           @relation("ProjectDeployments", fields: [projectId], references: [id], onDelete: Cascade)
+  currentForProject Project?          @relation("CurrentDeployment")
+  status            DeploymentStatus  @default(QUEUED)
+  trigger           DeploymentTrigger @default(MANUAL)
+  commitSha         String?
+  commitMsg         String?
+  detectedType      DetectedType?
+  imageTag          String?
+  containerId       String?
+  internalPort      Int?
+  hostname          String?
+  rolledBackFromId  String?
+  rolledBackFrom    Deployment?       @relation("RollbackChain", fields: [rolledBackFromId], references: [id])
+  rollbackTargets   Deployment[]      @relation("RollbackChain")
+  errorMessage      String?
+  queuedAt          DateTime          @default(now())
+  startedAt         DateTime?
+  finishedAt        DateTime?
+
+  logArchive LogArchive?
+
+  @@index([projectId, queuedAt])
+  @@map("deployments")
+}
+
+model EnvVar {
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  key        String
+  ciphertext Bytes
+  iv         Bytes
+  authTag    Bytes
+  updatedAt  DateTime @updatedAt
+
+  @@unique([projectId, key])
+  @@map("env_vars")
+}
+
+model LogArchive {
+  id           String     @id @default(cuid())
+  deploymentId String     @unique
+  deployment   Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+  storageKey   String
+  byteSize     Int
+  lineCount    Int
+  createdAt    DateTime   @default(now())
+
+  @@map("log_archives")
+}

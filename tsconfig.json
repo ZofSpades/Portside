@@ -5,6 +5,7 @@
     { "path": "packages/db" },
     { "path": "packages/docker" },
     { "path": "apps/api" },
-    { "path": "apps/worker" }
+    { "path": "apps/worker" },
+    { "path": "scripts" }
   ]
 }

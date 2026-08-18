@@ -1,0 +1,16 @@
+# Rendered for STATIC projects — no build step, just serve the context as-is.
+#
+# Ownership and the nginx cache dirs are fixed up at BUILD time (as root, in
+# this layer) so the container can run fully non-root at runtime — Portside
+# drops every Linux capability from running containers (see docs/SECURITY.md),
+# which would otherwise break stock nginx's startup chown() calls. Port 8080
+# instead of 80 for the same reason: binding <1024 needs a capability we
+# don't grant.
+FROM nginx:1.27-alpine
+RUN sed -i 's/listen  *80;/listen 8080;/; s/listen \[::\]:80;/listen [::]:8080;/' \
+      /etc/nginx/conf.d/default.conf \
+    && touch /var/run/nginx.pid \
+    && chown -R nginx:nginx /var/cache/nginx /var/run/nginx.pid /etc/nginx/conf.d
+COPY . /usr/share/nginx/html
+USER nginx
+EXPOSE 8080

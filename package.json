@@ -24,19 +24,26 @@
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "check-clean-tree": "node scripts/check-local-only-files.mjs",
+    "predeploy:demo": "tsc -b packages/core packages/docker",
+    "deploy:demo": "tsx scripts/deploy-demo.ts",
     "prisma:generate": "npm run generate --workspace packages/db",
     "prisma:migrate": "npm run migrate:dev --workspace packages/db",
     "prepare": "husky"
   },
   "devDependencies": {
+    "@types/dockerode": "^3.3.31",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",
     "eslint": "^9.17.0",
     "eslint-config-prettier": "^9.1.0",
     "husky": "^9.1.7",
     "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "dockerode": "^4.0.3"
   },
   "allowScripts": {
     "@prisma/client@6.19.3": true,
@@ -47,6 +54,7 @@
     "protobufjs@7.6.5": true,
     "sharp@0.34.5": true,
     "ssh2@1.17.0": true,
-    "esbuild@0.21.5": true
+    "esbuild@0.21.5": true,
+    "esbuild@0.28.2": true
   }
 }

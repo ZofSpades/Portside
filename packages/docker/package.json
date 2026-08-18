@@ -9,10 +9,14 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "dockerode": "^4.0.3"
+    "@portside/core": "*",
+    "dockerode": "^4.0.3",
+    "tar-fs": "^3.0.6"
   },
   "devDependencies": {
     "@types/dockerode": "^3.3.31",
+    "@types/node": "^22.10.2",
+    "@types/tar-fs": "^2.0.4",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   }

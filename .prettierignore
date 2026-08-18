@@ -4,3 +4,5 @@ build
 node_modules
 coverage
 *.md
+# Plain-text Dockerfile templates, not real Handlebars/HTML
+templates/*.hbs

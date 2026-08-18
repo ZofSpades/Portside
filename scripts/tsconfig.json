@@ -1,0 +1,9 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "../dist/scripts",
+    "rootDir": "."
+  },
+  "include": ["deploy-demo.ts"],
+  "references": [{ "path": "../packages/core" }, { "path": "../packages/docker" }]
+}

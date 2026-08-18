@@ -1,0 +1,16 @@
+# Rendered for NODE projects. {{PORT}} and {{ENTRYPOINT}} are filled in by
+# packages/docker/src/templates.ts based on project detection.
+FROM node:22-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm ci --omit=dev
+
+FROM node:22-alpine AS runtime
+WORKDIR /app
+RUN addgroup -S app && adduser -S app -G app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+ENV PORT={{PORT}}
+EXPOSE {{PORT}}
+USER app
+CMD ["node", "{{ENTRYPOINT}}"]

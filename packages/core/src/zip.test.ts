@@ -110,12 +110,14 @@ describe('safeExtractZip', () => {
     expect(existsSync(path.join(workDir, 'evil.txt'))).toBe(false);
   });
 
-  it('rejects an absolute-path entry', () => {
-    const zip = new AdmZip();
-    // AdmZip normalizes leading slashes on some platforms; use a Windows-style
-    // absolute path, which it preserves as entry text.
-    zip.addFile('C:/evil.txt', Buffer.from('pwned'));
-    zip.writeZip(zipPath);
+  it('rejects a POSIX absolute-path entry', () => {
+    // Everything Portside builds and runs in is a Linux container, so a
+    // POSIX absolute path is the attack vector that actually matters here —
+    // not a Windows drive-letter path, which isn't even absolute under
+    // POSIX path resolution and wouldn't escape destDir at all on Linux,
+    // silently passing this test on CI while looking like it passed on a
+    // Windows dev machine for the wrong reason.
+    writeFileSync(zipPath, buildRawZip([{ name: '/etc/passwd', data: Buffer.from('pwned') }]));
 
     expect(() => safeExtractZip(zipPath, destDir)).toThrow(/resolves outside/);
   });

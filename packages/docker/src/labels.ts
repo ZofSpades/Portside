@@ -19,11 +19,19 @@ export interface TraefikLabelInput {
    * replacing. Defaults to 1.
    */
   priority?: number;
+  /**
+   * An additional domain that should also route to this deployment,
+   * alongside the platform-assigned `<slug>.<domain>` hostname — e.g. a
+   * user's own "myapp.com". Adds a second Host() match to the same router
+   * rather than a separate router, so both hostnames share one priority.
+   */
+  customDomain?: string;
 }
 
 export interface TraefikLabelResult {
   labels: Record<string, string>;
   hostname: string;
+  customDomain?: string;
   routerName: string;
   serviceName: string;
 }
@@ -31,6 +39,22 @@ export interface TraefikLabelResult {
 const RESERVED_SLUGS = new Set(['api', 'app', 'traefik', 'www', 'admin', 'localhost']);
 const MIN_PORT = 1;
 const MAX_PORT = 65535;
+// Deliberately conservative (letters/digits/hyphens/dots, must contain a
+// dot): customDomain is user-supplied and gets embedded directly inside a
+// backtick-quoted Traefik rule string, so anything permitting a backtick,
+// parenthesis, or `||` would be a rule-injection vector into the router
+// config, not just a formatting concern.
+const DOMAIN_PATTERN =
+  /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/i;
+
+/**
+ * Same check `buildTraefikLabels` applies to `customDomain`, exported so
+ * the API can reject a malformed domain immediately (400) instead of the
+ * user only finding out when a deployment fails on it later.
+ */
+export function isValidCustomDomain(domain: string): boolean {
+  return DOMAIN_PATTERN.test(domain);
+}
 
 function shortHash(deploymentId: string): string {
   return createHash('sha256').update(deploymentId).digest('hex').slice(0, 8);
@@ -60,16 +84,23 @@ export function buildTraefikLabels(input: TraefikLabelInput): TraefikLabelResult
       `port must be an integer between ${MIN_PORT} and ${MAX_PORT}, got ${input.port}`,
     );
   }
+  const customDomain = input.customDomain?.trim() || undefined;
+  if (customDomain && !DOMAIN_PATTERN.test(customDomain)) {
+    throw new Error(`customDomain "${customDomain}" is not a valid hostname`);
+  }
 
   const domain = input.domain?.trim() || 'localhost';
   const priority = input.priority ?? 1;
   const hash = shortHash(input.deploymentId);
   const hostname = `${slug}.${domain}`;
   const name = `portside-${slug}-${hash}`;
+  const rule = customDomain
+    ? `Host(\`${hostname}\`) || Host(\`${customDomain}\`)`
+    : `Host(\`${hostname}\`)`;
 
   const labels: Record<string, string> = {
     'traefik.enable': 'true',
-    [`traefik.http.routers.${name}.rule`]: `Host(\`${hostname}\`)`,
+    [`traefik.http.routers.${name}.rule`]: rule,
     [`traefik.http.routers.${name}.entrypoints`]: 'web',
     [`traefik.http.routers.${name}.priority`]: String(priority),
     [`traefik.http.services.${name}.loadbalancer.server.port`]: String(input.port),
@@ -78,5 +109,5 @@ export function buildTraefikLabels(input: TraefikLabelInput): TraefikLabelResult
     'portside.deployment-id': input.deploymentId,
   };
 
-  return { labels, hostname, routerName: name, serviceName: name };
+  return { labels, hostname, customDomain, routerName: name, serviceName: name };
 }

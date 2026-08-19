@@ -31,6 +31,10 @@ without it. This is a client/engine version workaround, not a security boundary 
 
 - Env vars and GitHub OAuth tokens: AES-256-GCM, random IV per record, ciphertext/iv/authTag in
   separate columns. Key comes from `PORTSIDE_ENCRYPTION_KEY`.
+- The GitHub webhook signing secret (`Project.webhookSecret`) is stored in plaintext, unlike the
+  above — it's an HMAC key the webhook route compares against an inbound signature, not something
+  ever decrypted for use elsewhere, and it's never read by the worker or written to a deploy log.
+  Rotate it by clearing and regenerating, same as any webhook secret.
 - Secrets are injected into containers at **runtime**, never as build args — build args are
   baked permanently into image history.
 - Log lines are scanned and redacted against known secret values at the emit boundary
@@ -56,7 +60,11 @@ uncompressed size, file count, and compression ratio to defeat zip bombs.
 4. **No build-time resource limits beyond the 10-minute timeout.** BuildKit's own limits are
    weak; a pathological build can still stress the daemon during that window.
 5. **No per-tenant disk quota** on build workspaces beyond periodic janitor cleanup.
-6. **No image vulnerability scanning** (Trivy integration is a natural next step).
+6. ~~No image vulnerability scanning~~ Trivy now scans every built image and logs a
+   CRITICAL/HIGH/MEDIUM/LOW summary. Still **reporting only** — findings never block a deploy,
+   there's no severity threshold config, and a scan failure (timeout, cold DB download) is
+   swallowed and treated as "couldn't scan" rather than surfaced as a warning anywhere but the
+   build log itself.
 7. **Encryption key lives in an env var**, not a KMS/Vault — no key rotation story.
 8. **Single-node, single-trust-domain.** Container boundaries are the only tenant isolation;
    there's no further blast-radius containment if the host itself is compromised.

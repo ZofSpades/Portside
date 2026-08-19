@@ -92,4 +92,47 @@ describe('buildTraefikLabels', () => {
     const result = buildTraefikLabels({ ...base, domain: '   ' });
     expect(result.hostname.endsWith('.localhost')).toBe(true);
   });
+
+  it('adds the custom domain as a second Host() match on the same router', () => {
+    const result = buildTraefikLabels({ ...base, customDomain: 'my-app.com' });
+    expect(result.customDomain).toBe('my-app.com');
+    expect(result.labels[`traefik.http.routers.${result.routerName}.rule`]).toBe(
+      `Host(\`${result.hostname}\`) || Host(\`my-app.com\`)`,
+    );
+  });
+
+  it('omits customDomain from the result and uses a single Host() when not given', () => {
+    const result = buildTraefikLabels(base);
+    expect(result.customDomain).toBeUndefined();
+    expect(result.labels[`traefik.http.routers.${result.routerName}.rule`]).toBe(
+      `Host(\`${result.hostname}\`)`,
+    );
+  });
+
+  it('treats a blank customDomain the same as not providing one', () => {
+    const result = buildTraefikLabels({ ...base, customDomain: '   ' });
+    expect(result.customDomain).toBeUndefined();
+    expect(result.labels[`traefik.http.routers.${result.routerName}.rule`]).toBe(
+      `Host(\`${result.hostname}\`)`,
+    );
+  });
+
+  it('rejects a customDomain that could inject extra Traefik rule syntax', () => {
+    for (const malicious of [
+      'evil.com`) || PathPrefix(`/',
+      'evil.com" || "1"="1',
+      '(evil)',
+      'evil.com; rm -rf /',
+    ]) {
+      expect(() => buildTraefikLabels({ ...base, customDomain: malicious })).toThrow(
+        /not a valid hostname/,
+      );
+    }
+  });
+
+  it('rejects a customDomain with no dot (not a real FQDN)', () => {
+    expect(() => buildTraefikLabels({ ...base, customDomain: 'localhost' })).toThrow(
+      /not a valid hostname/,
+    );
+  });
 });

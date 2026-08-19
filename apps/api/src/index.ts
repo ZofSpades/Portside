@@ -8,6 +8,7 @@ import { runHealthCheck } from './health.js';
 import { registerLogRoutes } from './logs.js';
 import { registerProjectRoutes } from './projects.js';
 import { registerSession } from './session.js';
+import { registerWebhookRoutes } from './webhooks.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
@@ -58,6 +59,9 @@ async function start() {
   await app.register(registerProjectRoutes);
   await app.register(registerDeploymentRoutes);
   await app.register(registerLogRoutes);
+  // Intentionally not session-gated — GitHub authenticates itself via HMAC
+  // signature, not our cookie. See webhooks.ts for why.
+  await app.register(registerWebhookRoutes);
 
   try {
     await app.listen({ host: '0.0.0.0', port: PORT });

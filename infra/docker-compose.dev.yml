@@ -5,7 +5,7 @@ services:
   api:
     build:
       target: deps
-    command: sh -c "npm run generate --workspace packages/db && npx tsc -b packages/core packages/db && npx tsx watch apps/api/src/index.ts"
+    command: sh -c "npm run generate --workspace packages/db && npx tsc -b packages/core packages/db packages/docker && npx tsx watch apps/api/src/index.ts"
     environment:
       LOG_LEVEL: debug
     volumes:
@@ -13,6 +13,7 @@ services:
       - ../apps/api/src:/repo/apps/api/src
       - ../packages/core:/repo/packages/core
       - ../packages/db:/repo/packages/db
+      - ../packages/docker:/repo/packages/docker
     develop:
       watch:
         - action: sync

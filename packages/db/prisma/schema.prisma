@@ -19,6 +19,7 @@ enum DeploymentTrigger {
   MANUAL
   REDEPLOY
   ROLLBACK
+  WEBHOOK
 }
 
 enum DeploymentStatus {
@@ -74,6 +75,10 @@ model Project {
   startCmd            String?
   frameworkOverride   DetectedType?
   currentDeploymentId String?  @unique
+  /// Additional Host() Traefik routes to the same deployment, alongside the platform-assigned <slug>.<domain>.
+  customDomain        String?  @unique
+  /// HMAC-SHA256 signing secret for the GitHub push webhook. Only ever read by the webhook route for signature comparison — never passed to the worker or the deploy log stream, so it needs no redaction wiring. Null until the project has one.
+  webhookSecret       String?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 

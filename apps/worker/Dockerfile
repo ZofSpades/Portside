@@ -2,10 +2,13 @@
 FROM node:22-alpine AS base
 WORKDIR /repo
 # git is a real runtime dependency here — the worker shells out to it to
-# clone GIT-sourced projects (see apps/worker/src/git.ts). Installed in this
-# shared base (not just `runtime` below) so the dev target, which stops at
-# `deps`, has it too.
-RUN apk add --no-cache git
+# clone GIT-sourced projects (see apps/worker/src/git.ts). trivy scans every
+# built image for known vulnerabilities (see security-scan.ts). Both are
+# installed in this shared base (not just `runtime` below) so the dev
+# target, which stops at `deps`, has them too.
+RUN apk add --no-cache git curl \
+    && curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+      | sh -s -- -b /usr/local/bin
 
 FROM base AS deps
 COPY package.json package-lock.json* ./
@@ -27,9 +30,10 @@ RUN npx tsc -b packages/core packages/db packages/docker apps/worker
 FROM node:22-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /repo
-# git is a real runtime dependency here — the worker shells out to it to
-# clone GIT-sourced projects (see apps/worker/src/git.ts).
-RUN apk add --no-cache git \
+# See the note in `base` above for why git and trivy are both here.
+RUN apk add --no-cache git curl \
+    && curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+      | sh -s -- -b /usr/local/bin \
     && addgroup -S portside && adduser -S portside -G portside
 COPY --from=deps /repo/node_modules ./node_modules
 COPY --from=build /repo/packages/core/dist ./packages/core/dist

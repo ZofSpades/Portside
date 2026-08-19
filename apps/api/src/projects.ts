@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
@@ -6,6 +6,7 @@ import path from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { encrypt, sanitizeSlug, safeExtractZip } from '@portside/core';
 import { getPrismaClient } from '@portside/db';
+import { isValidCustomDomain } from '@portside/docker';
 import { Queue } from 'bullmq';
 import { currentUserId, requireAuth } from './auth.js';
 
@@ -79,6 +80,8 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
           sourceType: 'GIT',
           repoUrl: repoUrl.trim(),
           branch: branch?.trim() || 'main',
+          // Only GIT projects have somewhere to register a push webhook.
+          webhookSecret: randomBytes(32).toString('hex'),
         },
       });
 
@@ -287,5 +290,30 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
       where: { projectId: project.id },
       orderBy: { queuedAt: 'desc' },
     });
+  });
+
+  app.put<{ Body: { domain: string | null } }>('/api/projects/:id/domain', async (req, reply) => {
+    const project = await loadProjectOr404(req, reply);
+    if (!project) return;
+
+    const domain = req.body?.domain?.trim() || null;
+    if (domain && !isValidCustomDomain(domain)) {
+      return reply.code(400).send({ error: `"${domain}" is not a valid hostname` });
+    }
+    const prisma = getPrismaClient();
+    try {
+      const updated = await prisma.project.update({
+        where: { id: project.id },
+        data: { customDomain: domain },
+      });
+      reply.code(200).send(updated);
+    } catch (err) {
+      // Prisma's unique-constraint violation (P2002) — another project
+      // already claims this domain.
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'P2002') {
+        return reply.code(409).send({ error: 'That domain is already in use by another project' });
+      }
+      throw err;
+    }
   });
 }

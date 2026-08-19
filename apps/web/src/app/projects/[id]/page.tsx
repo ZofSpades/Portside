@@ -4,12 +4,14 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { use, useEffect, useState } from 'react';
 import {
+  API_URL,
   deleteEnvVar,
   deleteProject,
   getProject,
   listDeployments,
   listEnvVars,
   rollback,
+  setCustomDomain,
   setEnvVar,
   triggerDeploy,
   type Deployment,
@@ -140,6 +142,8 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
 
       {error && <p className="text-sm text-red-400">{error}</p>}
 
+      <DomainSection project={project} onChange={refresh} />
+
       <EnvVarsSection projectId={id} envVars={envVars} onChange={refresh} />
 
       <section className="flex flex-col gap-3">
@@ -200,6 +204,89 @@ function StatusBadge({ status }: { status: DeploymentStatus }) {
           : 'bg-amber-500/20 text-amber-300';
 
   return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${color}`}>{status}</span>;
+}
+
+function DomainSection({ project, onChange }: { project: Project; onChange: () => void }) {
+  const [domain, setDomain] = useState(project.customDomain ?? '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const webhookUrl = `${API_URL}/api/webhooks/github/${project.id}`;
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await setCustomDomain(project.id, domain.trim() || null);
+      onChange();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update domain');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function copySecret() {
+    if (!project.webhookSecret) return;
+    navigator.clipboard.writeText(project.webhookSecret).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
+  return (
+    <section className="flex flex-col gap-4">
+      <div className="flex flex-col gap-2">
+        <h2 className="text-sm font-medium text-slate-400">Custom domain</h2>
+        <form onSubmit={save} className="flex gap-2">
+          <input
+            value={domain}
+            onChange={(e) => setDomain(e.target.value)}
+            placeholder="myapp.com (optional)"
+            className="flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm"
+          />
+          <button
+            type="submit"
+            disabled={busy}
+            className="rounded border border-slate-700 px-3 py-1.5 text-sm hover:border-slate-500 disabled:opacity-50"
+          >
+            Save
+          </button>
+        </form>
+        {error && <p className="text-sm text-red-400">{error}</p>}
+        <p className="text-xs text-slate-500">
+          Routes alongside the platform URL — point this domain&apos;s DNS at your Portside host to
+          use it for real.
+        </p>
+      </div>
+
+      {project.sourceType === 'GIT' && project.webhookSecret && (
+        <div className="flex flex-col gap-2">
+          <h2 className="text-sm font-medium text-slate-400">Auto-deploy on push</h2>
+          <p className="text-xs text-slate-500">
+            Add this as a webhook in your repo&apos;s Settings → Webhooks — Payload URL below,
+            content type <code>application/json</code>, secret below, event: just the{' '}
+            <code>push</code> event.
+          </p>
+          <div className="flex items-center gap-2 rounded border border-slate-800 px-3 py-1.5 font-mono text-xs text-slate-300">
+            <span className="flex-1 truncate">{webhookUrl}</span>
+          </div>
+          <div className="flex items-center gap-2 rounded border border-slate-800 px-3 py-1.5 font-mono text-xs text-slate-300">
+            <span className="flex-1 truncate">{project.webhookSecret}</span>
+            <button
+              onClick={copySecret}
+              className="shrink-0 text-slate-500 hover:text-slate-200"
+              type="button"
+            >
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
 }
 
 function EnvVarsSection({

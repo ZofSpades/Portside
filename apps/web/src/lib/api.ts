@@ -15,6 +15,8 @@ export interface Project {
   branch: string;
   rootDir: string;
   currentDeploymentId: string | null;
+  customDomain: string | null;
+  webhookSecret: string | null;
   createdAt: string;
 }
 
@@ -123,6 +125,13 @@ export async function createProjectFromZip(name: string, file: File): Promise<Pr
 
 export function deleteProject(id: string): Promise<void> {
   return apiFetch(`/api/projects/${id}`, { method: 'DELETE' });
+}
+
+export function setCustomDomain(id: string, domain: string | null): Promise<Project> {
+  return apiFetch(`/api/projects/${id}/domain`, {
+    method: 'PUT',
+    body: JSON.stringify({ domain }),
+  });
 }
 
 export function listDeployments(projectId: string): Promise<Deployment[]> {

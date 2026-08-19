@@ -27,7 +27,7 @@ COPY tsconfig.base.json tsconfig.json ./
 COPY packages ./packages
 COPY apps/api ./apps/api
 RUN npm run generate --workspace packages/db
-RUN npx tsc -b packages/core packages/db apps/api
+RUN npx tsc -b packages/core packages/db packages/docker apps/api
 
 FROM node:22-slim AS runtime
 ENV NODE_ENV=production
@@ -41,6 +41,8 @@ COPY --from=build /repo/packages/core/package.json ./packages/core/package.json
 COPY --from=build /repo/packages/db/dist ./packages/db/dist
 COPY --from=build /repo/packages/db/package.json ./packages/db/package.json
 COPY --from=build /repo/packages/db/prisma ./packages/db/prisma
+COPY --from=build /repo/packages/docker/dist ./packages/docker/dist
+COPY --from=build /repo/packages/docker/package.json ./packages/docker/package.json
 COPY --from=build /repo/apps/api/dist ./apps/api/dist
 COPY --from=build /repo/apps/api/package.json ./apps/api/package.json
 USER portside

@@ -18,6 +18,9 @@ volumes:
   postgres-data:
   redis-data:
   build-workspaces:
+  # Trivy's vulnerability DB is ~500MB — persisted here so it's downloaded
+  # once, not on every worker restart.
+  trivy-cache:
 
 services:
   postgres:
@@ -153,6 +156,7 @@ services:
       # See the "known v1 gaps" list in docs/SECURITY.md.
       - /var/run/docker.sock:/var/run/docker.sock
       - build-workspaces:/var/portside/workspaces
+      - trivy-cache:/root/.cache/trivy
     networks:
       - portside-internal
     depends_on:

@@ -15,6 +15,7 @@
     "@fastify/secure-session": "^8.1.1",
     "@portside/core": "*",
     "@portside/db": "*",
+    "@portside/docker": "*",
     "bullmq": "^5.34.6",
     "fastify": "^5.1.0",
     "ioredis": "^5.4.1"

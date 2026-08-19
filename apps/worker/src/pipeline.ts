@@ -24,6 +24,7 @@ import Docker from 'dockerode';
 import type { Redis } from 'ioredis';
 import { cloneRepo } from './git.js';
 import { LogEmitter } from './log-emitter.js';
+import { formatSummary, scanImage } from './security-scan.js';
 
 const WORKSPACES_ROOT = process.env.PORTSIDE_WORKSPACES_ROOT ?? '/var/portside/workspaces';
 const NETWORK = 'portside-apps';
@@ -290,6 +291,17 @@ export async function runDeployPipeline(deploymentId: string, redis: Redis): Pro
       },
     });
     await prisma.deployment.update({ where: { id: deploymentId }, data: { imageTag } });
+
+    // Reporting only — never gates the deploy, however bad the findings.
+    // Worth reconsidering once there's a per-project way to opt into
+    // treating CRITICAL findings as a hard failure.
+    await checkPoint();
+    await logger.emit('Running security scan...');
+    const scanSummary = await scanImage(imageTag);
+    await logger.emit(
+      scanSummary ? formatSummary(scanSummary) : 'Security scan: skipped (scanner unavailable).',
+    );
+
     return imageTag;
   }
 
@@ -359,6 +371,7 @@ export async function runDeployPipeline(deploymentId: string, redis: Redis): Pro
       port: CONTAINER_PORT,
       domain: process.env.PORTSIDE_BASE_DOMAIN,
       priority: Date.now(),
+      customDomain: project.customDomain ?? undefined,
     });
 
     const env: Record<string, string> = {

@@ -66,7 +66,12 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    // Only declare a JSON body when one is actually being sent — Fastify's
+    // JSON body parser rejects a request outright (400
+    // FST_ERR_CTP_EMPTY_JSON_BODY) if the content-type says JSON but the
+    // body is empty, which every body-less call here (deploy, cancel,
+    // logout, delete) would otherwise hit on every real request.
+    headers: init?.body ? { 'Content-Type': 'application/json', ...init.headers } : init?.headers,
   });
   if (res.status === 204) return undefined as T;
   const body = await res.json().catch(() => ({}));

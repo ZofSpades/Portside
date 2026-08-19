@@ -29,8 +29,20 @@ export async function registerSession(app: FastifyInstance): Promise<void> {
     cookie: {
       path: '/',
       httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
+      // The dashboard (app.<domain>) and the API (api.<domain>) are
+      // different hosts, and critically different *sites* by the browser's
+      // own reckoning — "localhost" isn't on the public suffix list, so
+      // "app.localhost" and "api.localhost" are each their own eTLD+1, not
+      // subdomains of a shared site. A `lax` cookie is therefore withheld
+      // from every cross-origin fetch the dashboard makes to the API (it
+      // still gets set on login, it just never gets sent back), so this has
+      // to be `none`. That requires `Secure`, which still works over plain
+      // `http://*.localhost` in every modern browser — they special-case
+      // localhost as a secure context precisely for this kind of local dev
+      // setup — and is exactly what a real deployment needs anyway once
+      // it's behind real TLS (see docs/RUNBOOK.md).
+      sameSite: 'none',
+      secure: true,
       maxAge: 60 * 60 * 24 * 30, // 30 days
     },
   });

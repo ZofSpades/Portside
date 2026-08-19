@@ -56,8 +56,7 @@ PROMPT*.md
 BRIEF*.md
 plan.md
 
-# Internal notes (kept locally only)
+# Internal notes — kept locally only, not meant for the public repo.
 docs/CHANGELOG.md
 docs/DECISIONS.md
 docs/ROADMAP.md
-docs/RUNBOOK.md

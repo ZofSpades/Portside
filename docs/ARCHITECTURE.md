@@ -48,17 +48,23 @@ a live daemon.
 
 ## Deploy lifecycle
 
-1. API enqueues `{ deploymentId }` on the `deploys` BullMQ queue and returns `202` immediately.
+1. API enqueues `{ deploymentId }` on the `deploys` BullMQ queue and returns `202` immediately —
+   whether the trigger was a dashboard click or a validated GitHub push webhook
+   (`POST /api/webhooks/github/:projectId`, HMAC-verified, filtered to the project's configured
+   branch) makes no difference downstream; both just create a `Deployment` row and enqueue it.
 2. Worker picks up the job, re-reads all state from Postgres (never trusts job payload beyond
    the id), and acquires a per-project Redis lock so two deploys of the same project can't race.
 3. Worker clones the repo (or extracts the zip) into an ephemeral workspace, detects the project
    type, renders a Dockerfile from a template, and builds the image via the Docker Engine API
-   (`dockerode`), streaming build output to a Redis Stream as it goes.
-4. On a successful build, the worker starts the new container with resource limits and Traefik
-   labels — including a router priority of `Date.now()`, so it always outranks whatever it's
-   replacing on their shared hostname — then health-checks it and gracefully stops (5s SIGTERM
-   grace) the previous container for that project. See [DECISIONS.md](DECISIONS.md)'s ADR-006
-   for exactly what this blue/green swap does and doesn't guarantee.
+   (`dockerode`), streaming build output to a Redis Stream as it goes. A successful build is
+   scanned with Trivy; the CRITICAL/HIGH/MEDIUM/LOW summary lands in the log — reporting only,
+   never a gate on the deploy.
+4. The worker starts the new container with resource limits and Traefik labels — including a
+   router priority of `Date.now()`, so it always outranks whatever it's replacing on their shared
+   hostname, and (if the project has one) a second `Host()` match for its custom domain — then
+   health-checks it and gracefully stops (5s SIGTERM grace) the previous container for that
+   project. See [DECISIONS.md](DECISIONS.md)'s ADR-006 for exactly what this blue/green swap does
+   and doesn't guarantee.
 5. Traefik picks up the new container's labels via the Docker provider automatically — no proxy
    restart, no config file rewrite. See [writeups/dynamic-proxy-routing.md](writeups/dynamic-proxy-routing.md).
 6. The deployment row is marked `LIVE`; the previous one is marked `SUPERSEDED` and its image is

@@ -23,7 +23,6 @@ const FORBIDDEN_PATTERNS = [
   /(^|\/)docs\/CHANGELOG\.md$/i,
   /(^|\/)docs\/DECISIONS\.md$/i,
   /(^|\/)docs\/ROADMAP\.md$/i,
-  /(^|\/)docs\/RUNBOOK\.md$/i,
 ];
 
 function run(cmd) {

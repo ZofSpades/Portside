@@ -5,8 +5,8 @@ project type, builds it inside an isolated container via the Docker Engine API, 
 a reverse proxy with a zero-downtime swap, and hands back a live URL — with build logs streamed
 to a dashboard in real time.
 
-This is a portfolio project. It intentionally does one vertical slice well (static sites, Node.js
-apps, and Dockerfile-based apps) rather than supporting every framework.
+This is an evolving project. It intentionally does one vertical slice well (static sites, Node.js
+apps, and Dockerfile-based apps) rather than supporting every framework for now.
 
 ![Upload a project, watch it build with streamed logs, and reach it at a live URL](docs/demo.gif)
 
